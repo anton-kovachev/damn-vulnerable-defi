@@ -5,15 +5,8 @@ pragma solidity =0.8.25;
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ClimberTimelockBase} from "./ClimberTimelockBase.sol";
 import {ADMIN_ROLE, PROPOSER_ROLE, MAX_TARGETS, MIN_TARGETS, MAX_DELAY} from "./ClimberConstants.sol";
-import {
-    InvalidTargetsCount,
-    InvalidDataElementsCount,
-    InvalidValuesCount,
-    OperationAlreadyKnown,
-    NotReadyForExecution,
-    CallerNotTimelock,
-    NewDelayAboveMax
-} from "./ClimberErrors.sol";
+import {InvalidTargetsCount, InvalidDataElementsCount, InvalidValuesCount, OperationAlreadyKnown, NotReadyForExecution, CallerNotTimelock, NewDelayAboveMax} from "./ClimberErrors.sol";
+import {console2} from "forge-std/console2.sol";
 
 /**
  * @title ClimberTimelock
@@ -57,6 +50,8 @@ contract ClimberTimelock is ClimberTimelockBase {
         }
 
         bytes32 id = getOperationId(targets, values, dataElements, salt);
+        console2.log("Scheduling operation with id: ");
+        console2.logBytes32(id);
 
         if (getOperationState(id) != OperationState.Unknown) {
             revert OperationAlreadyKnown(id);
@@ -69,10 +64,12 @@ contract ClimberTimelock is ClimberTimelockBase {
     /**
      * Anyone can execute what's been scheduled via `schedule`
      */
-    function execute(address[] calldata targets, uint256[] calldata values, bytes[] calldata dataElements, bytes32 salt)
-        external
-        payable
-    {
+    function execute(
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata dataElements,
+        bytes32 salt
+    ) external payable {
         if (targets.length <= MIN_TARGETS) {
             revert InvalidTargetsCount();
         }
